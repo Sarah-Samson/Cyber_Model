@@ -1,10 +1,8 @@
 import os
-import sys
 import json
 import numpy as np
 import pandas as pd
 import warnings
-from typing import Dict, Tuple, Any
 from datetime import datetime
 import streamlit as st
 
@@ -16,39 +14,46 @@ from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
 
-# --- UI Layout Initialization ---
+# --- UI Configuration ---
 st.set_page_config(
-    page_title="Cyber & AI Risk Insurance Pricing",
-    page_icon="🛡️",
+    page_title="Cyber Insurance Pricing Engine", 
+    page_icon="🛡️", 
     layout="wide"
 )
 
-st.title("🛡️ Cyber & AI Risk Insurance Pricing Engine")
-st.markdown("Dynamic actuarial pricing using AI-powered Frequency-Severity models with absolute data-type safety.")
+# Custom Styling (Black and Gold Theme)
+st.markdown("""
+    <style>
+    .reportview-container { background: #111111; color: #FFFFFF; }
+    .main-header { color: #D4AF37; font-size: 32px; font-weight: bold; text-align: center; margin-bottom: 20px; }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- Constant Operational Parameters ---
-LOADING_FACTORS = {"acquisition": 0.20, "admin": 0.10, "profit": 0.15, "uncertainty": 0.08, "reinsurance": 0.05}
-TOTAL_LOADING = sum(LOADING_FACTORS.values())
-LOADING_MULTIPLIER = 1 + TOTAL_LOADING
+st.markdown('<div class="main-header">🛡️ Cyber Insurance Pricing Engine & Risk Validator</div>', unsafe_allow_html=True)
 
-INDUSTRY_RELATIVITIES = {"51": 1.231, "52": 1.181, "44-45": 1.264, "92": 1.221, "31-33": 1.023}
+# --- Constant Mappings ---
 INDUSTRY_CODES = {
-    "31-33": "Industrial Manufacturing",
-    "44-45": "Retail",
     "51": "Technology",
     "52": "Finance & Insurance",
-    "92": "Telecom"
+    "44-45": "Retail Trade",
+    "92": "Public Administration / Telecom",
+    "31-33": "Industrial Manufacturing"
 }
+INDUSTRY_RELATIVITIES = {"51": 1.231, "52": 1.181, "44-45": 1.264, "92": 1.221, "31-33": 1.023}
+LOADING_MULTIPLIER = 1.58
 
 # =====================================================================
-# PHASE 1: CORE ACTUARIAL DATA & ENGINE CALIBRATION (CACHED)
+# PHASE 1: DATA PIPELINE & MODEL CACHING
 # =====================================================================
+
 @st.cache_data
-def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
+def initialize_and_train_models():
+    """Loads operational records and fits Generalized Linear Regression models natively."""
     try:
         incidents = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/incidents_master_cleaned.csv")
         financial = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/financial_impact_cleaned.csv")
         
+        # 1. Frequency Model
         company_freq = incidents.groupby("company_name").agg({
             "incident_id": "count",
             "company_revenue_usd": "first",
@@ -75,6 +80,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
             "is_public": float(freq_model.coef_[2])
         }
 
+        # 2. Severity Model
         merged = incidents.merge(financial, on="incident_id", how="inner")
         X_sev = merged[["company_revenue_usd", "employee_count", "is_public_company"]].copy()
         X_sev["log_revenue"] = np.log1p(X_sev["company_revenue_usd"])
@@ -94,33 +100,47 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
             "is_public": float(sev_model.coef_[2]),
             "log_records": float(sev_model.coef_[3]),
         }
-        
-        lognorm_params = {"mu": float(np.log(merged["total_loss_usd"]).mean()), "sigma": float(np.log(merged["total_loss_usd"]).std())}
 
-        return freq_coefs, sev_coefs, lognorm_params
+        return freq_coefs, sev_coefs, True
     except Exception as e:
-        st.error(f"Critical Backend Training Fault: {e}")
-        return {}, {}, {}
+        st.error(f"Actuarial Core Calibration Error: {e}")
+        return {}, {}, False
 
-FREQ_COEFFICIENTS, SEVER_COEFFICIENTS, LOGNORM_PARAMS = calibrate_actuarial_core()
+# Run global background pipeline configuration
+FREQ_COEFFICIENTS, SEVER_COEFFICIENTS, DATA_OPERATIONAL = initialize_and_train_models()
 
 # =====================================================================
 # PHASE 2: MATHEMATICAL PREDICTIONS & SUB-ROUTINES
 # =====================================================================
+
 def predict_frequency(revenue: float, employees: int, is_public: bool) -> dict:
     log_rev = np.log1p(revenue)
     log_emp = np.log1p(employees)
     pub_val = 1 if is_public else 0
-    log_lambda = FREQ_COEFFICIENTS["intercept"] + (FREQ_COEFFICIENTS["log_revenue"] * log_rev) + (FREQ_COEFFICIENTS["log_employees"] * log_emp) + (FREQ_COEFFICIENTS["is_public"] * pub_val)
+    
+    log_lambda = (
+        FREQ_COEFFICIENTS["intercept"] + 
+        (FREQ_COEFFICIENTS["log_revenue"] * log_rev) + 
+        (FREQ_COEFFICIENTS["log_employees"] * log_emp) + 
+        (FREQ_COEFFICIENTS["is_public"] * pub_val)
+    )
     predicted_freq = np.exp(log_lambda)
-    return {"predicted_frequency": float(predicted_freq), "risk_score": float(min(100.0, (predicted_freq / 2.5) * 100))}
+    risk_score = min(100.0, max(0.0, (predicted_freq / 2.5) * 100))
+    return {"predicted_frequency": float(predicted_freq), "risk_score": float(risk_score)}
 
 def predict_severity(revenue: float, employees: int, is_public: bool, records: int) -> dict:
     log_rev = np.log1p(revenue)
     log_emp = np.log1p(employees)
     log_rec = np.log1p(records)
     pub_val = 1 if is_public else 0
-    log_loss = SEVER_COEFFICIENTS["intercept"] + (SEVER_COEFFICIENTS["log_revenue"] * log_rev) + (SEVER_COEFFICIENTS["log_employees"] * log_emp) + (SEVER_COEFFICIENTS["is_public"] * pub_val) + (SEVER_COEFFICIENTS["log_records"] * log_rec)
+    
+    log_loss = (
+        SEVER_COEFFICIENTS["intercept"] + 
+        (SEVER_COEFFICIENTS["log_revenue"] * log_rev) + 
+        (SEVER_COEFFICIENTS["log_employees"] * log_emp) + 
+        (SEVER_COEFFICIENTS["is_public"] * pub_val) + 
+        (SEVER_COEFFICIENTS["log_records"] * log_rec)
+    )
     return {"expected_severity": float(np.exp(log_loss))}
 
 def calculate_pure_premium(freq: float, sev: float) -> dict:
@@ -129,13 +149,45 @@ def calculate_pure_premium(freq: float, sev: float) -> dict:
     return {
         "pure_premium": pure_premium,
         "final_premium": final_premium,
-        "loading_components": {k: final_premium * v for k, v in LOADING_FACTORS.items()},
+        "loading_components": {
+            "acquisition": final_premium * 0.20,
+            "admin": final_premium * 0.10,
+            "profit": final_premium * 0.15,
+            "uncertainty": final_premium * 0.08,
+            "reinsurance": final_premium * 0.05
+        },
         "total_loading": final_premium - pure_premium
     }
 
 # =====================================================================
-# PHASE 3: COMPREHENSIVE UNDERWRITING SYSTEM TOOLS
+# PHASE 3: AGENT ANALYTICS HELPER TOOLS
 # =====================================================================
+
+def explain_coverage_tiers(tier_name: str) -> str:
+    """Provides legal policy definitions for requested coverage levels."""
+    definitions = {
+        "tier 1": "Primary Coverage (Tier 1) mitigates external catastrophic events: Ransomware response, large-scale data leaks, and direct upstream supply-chain software compromises.",
+        "tier 2": "Secondary Coverage (Tier 2) monitors operational disruptions: Layer 7 DDoS attacks, internal Trojan infections, automated keyloggers, and persistence-based Advanced Persistent Threats (APTs)."
+    }
+    return definitions.get(tier_name.lower().strip(), "Specified coverage tier parameters are unmapped.")
+
+def compare_coverage_costs(base_premium: float) -> str:
+    """Applies actuarial split metrics to compute tier cost profiles."""
+    try:
+        premium = float(base_premium)
+        comparison = {
+            "tier_1_cost": f"${(premium * 0.625):,.2f}",
+            "tier_2_cost": f"${(premium * 0.375):,.2f}",
+            "combined_total": f"${premium:,.2f}"
+        }
+        return json.dumps(comparison, indent=2)
+    except Exception as e:
+        return f"Comparison breakdown engine error: {e}"
+
+# =====================================================================
+# PHASE 4: CENTRAL UNDERWRITING CALCULATION ENGINE
+# =====================================================================
+
 def premium_quotation_tool(
     company_name: str,
     company_revenue_usd: float,
@@ -144,25 +196,26 @@ def premium_quotation_tool(
     is_public_company: bool,
     data_records_at_risk: int = 1000000,
 ) -> str:
-    """Computes premium metrics while enforcing explicit parameter boundaries."""
+    """Computes final quotes while dynamically blocking shorthand parameter hallucinations."""
     try:
+        # --- INPUT TYPE & UNIT GUARDRAIL ---
         raw_revenue = float(company_revenue_usd)
         parsed_employees = int(employee_count)
         parsed_records = int(data_records_at_risk)
         
-        # Guardrail against short-handing billions/millions
+        # Unit scaling safety verification
         if raw_revenue < 1000000:
             if parsed_employees > 500 or parsed_records > 100000:
-                raw_revenue *= 1_000_000_000
+                raw_revenue *= 1_000_000_000  # Automatically scales up Billions
             else:
-                raw_revenue *= 1_000_000
+                raw_revenue *= 1_000_000      # Automatically scales up Millions
 
         if isinstance(is_public_company, str):
             parsed_is_public = is_public_company.lower() in ['true', 'yes', '1', 'public']
         else:
             parsed_is_public = bool(is_public_company)
 
-        # Execute formulas
+        # Execution of predictive sub-routines
         freq_res = predict_frequency(raw_revenue, parsed_employees, parsed_is_public)
         sev_res = predict_severity(raw_revenue, parsed_employees, parsed_is_public, parsed_records)
         
@@ -170,104 +223,100 @@ def premium_quotation_tool(
         prem_res = calculate_pure_premium(freq_res["predicted_frequency"], sev_res["expected_severity"])
         
         adjusted_premium = prem_res["final_premium"] * ind_rel
-        t1 = adjusted_premium * 1.00
-        t2 = adjusted_premium * 0.60
+        
+        t1 = adjusted_premium * 0.625
+        t2 = adjusted_premium * 0.375
 
         quotation = {
             "quotation_id": f"QUOTE-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            "company": {
+            "company_profile": {
                 "name": company_name,
                 "revenue_usd": f"${raw_revenue:,.0f}",
                 "employees": parsed_employees,
-                "industry": INDUSTRY_CODES.get(str(industry_code), "Unknown"),
-                "status": "Public" if parsed_is_public else "Private",
+                "industry": INDUSTRY_CODES.get(str(industry_code), "Unknown Segment"),
+                "corporate_status": "Public" if parsed_is_public else "Private",
             },
             "actuarial_metrics": {
-                "predicted_frequency_EXTRACTED": round(freq_res["predicted_frequency"], 4),
-                "risk_score": round(freq_res["risk_score"], 1),
-                "expected_severity_EXTRACTED": f"${sev_res['expected_severity']:,.0f}",
-                "pure_premium": f"${prem_res['pure_premium']:,.0f}",
+                "predicted_annual_frequency": round(freq_res["predicted_frequency"], 4),
+                "composite_risk_score": f"{freq_res['risk_score']:.1f}/100",
+                "expected_incident_severity": f"${sev_res['expected_severity']:,.2f}",
+                "pure_premium_baseline": f"${prem_res['pure_premium']:,.2f}"
             },
             "adjustments": {
-                "base_final_premium": f"${prem_res['final_premium']:,.0f}",
-                "industry_adjustment_factor": f"{ind_rel:.3f}x",
-                "final_adjusted_premium": f"${adjusted_premium:,.0f}",
+                "industry_relativity_applied": f"{ind_rel:.3f}x",
+                "total_annual_combined_premium": f"${adjusted_premium:,.2f}"
             },
-            "coverage_tier_1_primary": {
-                "name": "Primary Coverage (Tier 1)",
-                "covers": ["Ransomware", "Data Breaches", "Supply Chain"],
-                "annual_premium": f"${t1:,.0f}",
-            },
-            "coverage_tier_2_secondary": {
-                "name": "Secondary Coverage (Tier 2)",
-                "covers": ["DDoS", "Malware", "Trojans", "Backdoors", "APTs"],
-                "annual_premium": f"${t2:,.0f}",
-            },
-            "coverage_combined": {
-                "name": "Complete Coverage (Tier 1 + Tier 2)",
-                "annual_premium": f"${(t1 + t2):,.0f}",
-            },
+            "coverage_structures": {
+                "tier_1_primary": {
+                    "scope": "Ransomware, Data Breaches, Supply Chain Compromises",
+                    "annual_premium": f"${t1:,.2f}"
+                },
+                "tier_2_secondary": {
+                    "scope": "DDoS Mitigations, Trojans, Malware, APT System Damages",
+                    "annual_premium": f"${t2:,.2f}"
+                },
+                "combined_total": f"${adjusted_premium:,.2f}"
+            }
         }
         return json.dumps(quotation, indent=2)
     except Exception as e:
-        return json.dumps({"error": str(e)}, indent=2)
-
-def explain_coverage_tiers(tier_id: int) -> str:
-    info = {
-        1: "Tier 1 covers Ransomware events, Forensics responses, Core recovery pipelines, and Data Breach leaks.",
-        2: "Tier 2 covers Advanced network layer DDoS mitigation, internal Backdoors, Trojans, and APT system damages."
-    }
-    return info.get(int(tier_id), "Invalid selection choice.")
-
-def compare_coverage_costs(tier1_premium: float) -> str:
-    p = float(tier1_premium)
-    return json.dumps({"tier_1_only": f"${p:,.0f}", "tier_2_only": f"${(p*0.6):,.0f}", "combined": f"${(p*1.6):,.0f}"}, indent=2)
+        return json.dumps({"underwriting_engine_fault": str(e)}, indent=2)
 
 # =====================================================================
-# PHASE 4: AGENT WORKFLOW DEFINITIONS & SCHEMAS
+# PHASE 5: DEFINITIVE AGENT INITIALIZATION & AGNO WORKFLOW
 # =====================================================================
+
 def create_quotation_agent() -> Agent:
+    """Generates the primary pricing agent bound to explicit tool structures."""
     return Agent(
-        name="Cyber Risk Premium Quotation Agent",
+        name="Cyber Insurance Pricing Agent",
         model=Gemini(id="gemini-2.5-flash"),
         tools=[premium_quotation_tool, explain_coverage_tiers, compare_coverage_costs],
-        instructions="""You are an expert cyber insurance underwriting agent.
-
-        EXECUTION PROTOCOL:
-        1. When a user provides text details, meticulously map out each variable required by 'premium_quotation_tool'.
-        2. If the user writes text like "Annual Revenue(USD): 150000", read the number literally as 150000.0. 
-        3. Ensure parameters are never mixed up. Pass revenue to 'company_revenue_usd' and employees to 'employee_count'.
-        4. Translate sectors to code strings carefully: Technology/Tech -> '51', Finance -> '52', Retail -> '44-45'.
-        5. Present calculated outputs clearly using Markdown tables containing Tier 1, Tier 2, and Combined coverage tiers.""",
-        markdown=True,
+        instructions="""You are an expert underwriter executing tasks within an insurance ecosystem.
+        
+        CRITICAL PROCESSING INTERFACE RULES:
+        1. Always map conversational revenue phrases into precise numerical float representations for 'premium_quotation_tool':
+           - '150 Billion' -> 150000000000.0
+           - '25 Million' -> 25000000.0
+           - Do NOT pass shorthand single digits like 150 or 25. Doing so breaks the GLM pricing weights.
+           
+        2. Translate sector strings to the target system codes:
+           - Tech/Technology -> '51'
+           - Finance/Banking/Insurance -> '52'
+           - Retail -> '44-45'
+           - Telecom/Public Admin -> '92'
+           - Manufacturing -> '31-33'
+           
+        3. Present final calculated outputs using clean Markdown tables featuring Tier 1, Tier 2, and Combined coverage amounts.""",
+        markdown=True
     )
 
-# =====================================================================
-# PHASE 5: LIVE RUNTIME INTERFACE (STREAMLIT ORCHESTRATION)
-# =====================================================================
-if "insurance_agent_messages" not in st.session_state:
-    st.session_state.insurance_agent_messages = [
-        {"role": "assistant", "content": "Welcome to the Cyber Insurance Pricing Engine. Please provide company details to begin risk underwriting."}
+# --- Chat Interface Stateful Orchestration ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [
+        {"role": "assistant", "content": "Welcome to the Cyber Insurance Pricing Engine. Please provide company profiles to begin risk underwriting."}
     ]
 
-if "quotation_agent" not in st.session_state:
-    st.session_state.quotation_agent = create_quotation_agent()
+if "pricing_agent" not in st.session_state:
+    st.session_state.pricing_agent = create_quotation_agent()
 
-for msg in st.session_state.insurance_agent_messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Render historic interactions
+for entry in st.session_state.chat_history:
+    with st.chat_message(entry["role"]):
+        st.markdown(entry["content"])
 
-if user_query := st.chat_input("Describe your corporate structure or request premium matrices..."):
-    st.session_state.insurance_agent_messages.append({"role": "user", "content": user_query})
+# Process current conversation framework
+if prompt_input := st.chat_input("Enter company risk profile details..."):
+    st.session_state.chat_history.append({"role": "user", "content": prompt_input})
     with st.chat_message("user"):
-        st.markdown(user_query)
+        st.markdown(prompt_input)
 
     with st.chat_message("assistant"):
-        response_placeholder = st.empty()
+        ui_placeholder = st.empty()
         try:
-            agent_response = st.session_state.quotation_agent.run(user_query)
-            output_text = agent_response.content if hasattr(agent_response, 'content') else str(agent_response)
-            response_placeholder.markdown(output_text)
-            st.session_state.insurance_agent_messages.append({"role": "assistant", "content": output_text})
-        except Exception as e:
-            response_placeholder.error(f"Processing Error Encountered: {e}")
+            agent_output = st.session_state.pricing_agent.run(prompt_input)
+            response_payload = agent_output.content if hasattr(agent_output, 'content') else str(agent_output)
+            ui_placeholder.markdown(response_payload)
+            st.session_state.chat_history.append({"role": "assistant", "content": response_payload})
+        except Exception as runtime_err:
+            ui_placeholder.error(f"Agent Framework Connection Exception: {runtime_err}")
