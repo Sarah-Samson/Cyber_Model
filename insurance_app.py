@@ -16,9 +16,11 @@ from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings("ignore")
 
-# --- UI Layout Initialization ---
+# =====================================================================
+# SYSTEM CONFIGURATION & UI LAYOUT
+# =====================================================================
 st.set_page_config(
-    page_title="Cyber & AI Risk Insurance Pricing",
+    page_title="Cyber & AI Risk Insurance Pricing Engine",
     page_icon="🛡️",
     layout="wide"
 )
@@ -26,7 +28,7 @@ st.set_page_config(
 st.title("🛡️ Cyber & AI Risk Insurance Pricing Engine")
 st.markdown("Dynamic actuarial pricing using AI-powered Frequency-Severity models with absolute data-type safety.")
 
-# --- Constant Operational Parameters ---
+# --- Operational Actuarial Constants ---
 LOADING_FACTORS = {"acquisition": 0.20, "admin": 0.10, "profit": 0.15, "uncertainty": 0.08, "reinsurance": 0.05}
 TOTAL_LOADING = sum(LOADING_FACTORS.values())
 LOADING_MULTIPLIER = 1 + TOTAL_LOADING
@@ -41,14 +43,16 @@ INDUSTRY_CODES = {
 }
 
 # =====================================================================
-# PHASE 1: CORE ACTUARIAL DATA & ENGINE CALIBRATION (CACHED)
+# CORE ACTUARIAL DATA & ENGINE CALIBRATION (CACHED)
 # =====================================================================
 @st.cache_data
 def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
     try:
-        incidents = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/incidents_master_cleaned.csv")
-        financial = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/financial_impact_cleaned.csv")
+        # Load datasets directly from your personal repository
+        incidents = pd.read_csv("https://raw.githubusercontent.com/Sarah-Samson/Cyber_Model/refs/heads/main/data/incidents_master_cleaned.csv")
+        financial = pd.read_csv("https://raw.githubusercontent.com/Sarah-Samson/Cyber_Model/refs/heads/main/data/financial_impact_cleaned.csv")
         
+        # 1. Frequency Model Data Preparation
         company_freq = incidents.groupby("company_name").agg({
             "incident_id": "count",
             "company_revenue_usd": "first",
@@ -65,6 +69,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
         freq_cols = ["log_revenue", "log_employees", "is_public_company", "revenue_tier"]
         X_train_f, _, y_train_f, _ = train_test_split(X_freq[freq_cols].fillna(0), y_freq, test_size=0.2, random_state=42)
         
+        # Train GLM Poisson Regressor for baseline frequency metrics
         freq_model = PoissonRegressor(alpha=0.1292, max_iter=1000)
         freq_model.fit(X_train_f, y_train_f)
         
@@ -75,6 +80,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
             "is_public": float(freq_model.coef_[2])
         }
 
+        # 2. Severity Model Data Preparation
         merged = incidents.merge(financial, on="incident_id", how="inner")
         X_sev = merged[["company_revenue_usd", "employee_count", "is_public_company"]].copy()
         X_sev["log_revenue"] = np.log1p(X_sev["company_revenue_usd"])
@@ -84,6 +90,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
         sev_cols = ["log_revenue", "log_employees", "is_public_company", "log_records"]
         X_train_s, _, y_train_s, _ = train_test_split(X_sev[sev_cols].fillna(0), np.log(merged["total_loss_usd"]), test_size=0.2, random_state=42)
         
+        # Train Ridge Regressor for baseline severity logs
         sev_model = Ridge(alpha=1.0)
         sev_model.fit(X_train_s, y_train_s)
         
@@ -105,7 +112,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
 FREQ_COEFFICIENTS, SEVER_COEFFICIENTS, LOGNORM_PARAMS = calibrate_actuarial_core()
 
 # =====================================================================
-# PHASE 2: MATHEMATICAL PREDICTIONS & SUB-ROUTINES
+# UNDERLYING MATHEMATICAL CALCULATIONS
 # =====================================================================
 def predict_frequency(revenue: float, employees: int, is_public: bool) -> dict:
     log_rev = np.log1p(revenue)
@@ -132,8 +139,9 @@ def calculate_pure_premium(freq: float, sev: float) -> dict:
         "loading_components": {k: final_premium * v for k, v in LOADING_FACTORS.items()},
         "total_loading": final_premium - pure_premium
     }
+
 # =====================================================================
-# PHASE 3: COMPREHENSIVE UNDERWRITING SYSTEM TOOLS (CORRECTED)
+# EXPLICIT UNDERWRITING SYSTEM TOOLS
 # =====================================================================
 def premium_quotation_tool(
     company_name: str,
@@ -143,9 +151,8 @@ def premium_quotation_tool(
     is_public_company: bool,
     data_records_at_risk: int = 1000,
 ) -> str:
-    """Computes premium metrics enforcing strict numeric inputs without arbitrary scaling."""
+    """Computes pure and final insurance premium options without any hidden scaling modifiers."""
     try:
-        # Enforce exact numbers as provided by the parser
         raw_revenue = float(company_revenue_usd)
         parsed_employees = int(employee_count)
         parsed_records = int(data_records_at_risk)
@@ -155,14 +162,14 @@ def premium_quotation_tool(
         else:
             parsed_is_public = bool(is_public_company)
 
-        # Execute actuarial baseline formulas
+        # Map models using pristine numerical arguments directly
         freq_res = predict_frequency(raw_revenue, parsed_employees, parsed_is_public)
         sev_res = predict_severity(raw_revenue, parsed_employees, parsed_is_public, parsed_records)
         
         ind_rel = INDUSTRY_RELATIVITIES.get(str(industry_code), 1.0)
         prem_res = calculate_pure_premium(freq_res["predicted_frequency"], sev_res["expected_severity"])
         
-        # Calculate premium tiers
+        # Structure underwriting tiers cleanly
         adjusted_premium = prem_res["final_premium"] * ind_rel
         t1 = adjusted_premium * 1.00
         t2 = adjusted_premium * 0.60
@@ -218,36 +225,38 @@ def compare_coverage_costs(tier1_premium: float) -> str:
     return json.dumps({"tier_1_only": f"${p:,.0f}", "tier_2_only": f"${(p*0.6):,.0f}", "combined": f"${(p*1.6):,.0f}"}, indent=2)
 
 # =====================================================================
-# PHASE 4: AGENT WORKFLOW DEFINITIONS & SCHEMAS (CORRECTED)
+# AGENT INSTANTIATION
 # =====================================================================
 def create_quotation_agent() -> Agent:
     return Agent(
         name="Cyber Risk Premium Quotation Agent",
         model=Gemini(id="gemini-2.5-flash"),
         tools=[premium_quotation_tool, explain_coverage_tiers, compare_coverage_costs],
-        instructions="""You are an expert cyber insurance underwriting agent.
+        instructions="""You are an expert cyber insurance underwriting assistant.
 
-        EXECUTION PROTOCOL:
-        1. Parse the user's input text to extract: Company Name, Annual Revenue, Employee Count, Industry, Public/Private status, and Data Records at Risk.
-        2. Convert text strings containing numbers directly into raw float or integer values for the tool arguments:
-           - If user says "Annual Revenue(USD): 150000", pass 150000.0 exactly.
-           - If user says "150 Billion USD", pass 150000000000.0 exactly.
-        3. Match industries to codes carefully: Technology/Tech -> '51', Finance -> '52', Retail -> '44-45', Telecom -> '92', Manufacturing -> '31-33'.
-        4. Always present the final output back to the user in a clean Markdown table format detailing Tier 1, Tier 2, and Combined annual premiums based on the tool's response.""",
+        CRITICAL EXECUTION RULES:
+        1. Parse the user's conversational text strictly to extract individual fields for 'premium_quotation_tool'.
+        2. Read numbers provided in text literally without making internal assumptions:
+           - If user says "Annual Revenue(USD): 150000", convert this to 150000.0. 
+           - If user writes out "150 Billion USD", scale it manually and pass 150000000000.0.
+        3. Match the Industry domain to its explicit string code: Technology -> '51', Finance -> '52', Retail -> '44-45', Telecom -> '92'.
+        4. Render the output back to the user utilizing a markdown comparison table displaying Primary, Secondary, and Combined premiums.""",
         markdown=True,
     )
 
 # =====================================================================
-# PHASE 5: LIVE RUNTIME INTERFACE (STREAMLIT ORCHESTRATION)
+# RUNTIME ORCHESTRATION & COMPONENT STATE MANAGEMENT
 # =====================================================================
 if "insurance_agent_messages" not in st.session_state:
     st.session_state.insurance_agent_messages = [
         {"role": "assistant", "content": "Welcome to the Cyber Insurance Pricing Engine. Please provide company details to begin risk underwriting."}
     ]
 
-if "quotation_agent" not in st.session_state:
+# Explicitly ensure the old agent configuration is overwritten in the live cache
+if "quotation_agent" not in st.session_state or st.sidebar.button("Reset Underwriting Agent State"):
     st.session_state.quotation_agent = create_quotation_agent()
 
+# Display active context logs
 for msg in st.session_state.insurance_agent_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
