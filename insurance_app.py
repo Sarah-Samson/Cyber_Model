@@ -45,12 +45,10 @@ INDUSTRY_CODES = {
 # =====================================================================
 @st.cache_data
 def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
-    """Loads operational datasets natively and extracts linear modeling coefficients safely."""
     try:
         incidents = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/incidents_master_cleaned.csv")
         financial = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/financial_impact_cleaned.csv")
         
-        # Frequency Pipeline Tuning
         company_freq = incidents.groupby("company_name").agg({
             "incident_id": "count",
             "company_revenue_usd": "first",
@@ -77,7 +75,6 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
             "is_public": float(freq_model.coef_[2])
         }
 
-        # Severity Pipeline Tuning
         merged = incidents.merge(financial, on="incident_id", how="inner")
         X_sev = merged[["company_revenue_usd", "employee_count", "is_public_company"]].copy()
         X_sev["log_revenue"] = np.log1p(X_sev["company_revenue_usd"])
@@ -105,7 +102,6 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
         st.error(f"Critical Backend Training Fault: {e}")
         return {}, {}, {}
 
-# Run background operations
 FREQ_COEFFICIENTS, SEVER_COEFFICIENTS, LOGNORM_PARAMS = calibrate_actuarial_core()
 
 # =====================================================================
@@ -148,14 +144,13 @@ def premium_quotation_tool(
     is_public_company: bool,
     data_records_at_risk: int = 1000000,
 ) -> str:
-    """Computes premium metrics while using a robust guardrail to fix single-digit parsing issues."""
+    """Computes premium metrics while enforcing explicit parameter boundaries."""
     try:
-        # --- ACTUARIAL UNIT GUARDRAIL ---
         raw_revenue = float(company_revenue_usd)
         parsed_employees = int(employee_count)
         parsed_records = int(data_records_at_risk)
         
-        # Catch and upscale if the model clips shorthand parameters down to simple integers
+        # Guardrail against short-handing billions/millions
         if raw_revenue < 1000000:
             if parsed_employees > 500 or parsed_records > 100000:
                 raw_revenue *= 1_000_000_000
@@ -167,7 +162,7 @@ def premium_quotation_tool(
         else:
             parsed_is_public = bool(is_public_company)
 
-        # Run Actuarial Matrix Processors
+        # Execute formulas
         freq_res = predict_frequency(raw_revenue, parsed_employees, parsed_is_public)
         sev_res = predict_severity(raw_revenue, parsed_employees, parsed_is_public, parsed_records)
         
@@ -211,7 +206,6 @@ def premium_quotation_tool(
             "coverage_combined": {
                 "name": "Complete Coverage (Tier 1 + Tier 2)",
                 "annual_premium": f"${(t1 + t2):,.0f}",
-                "recommended_for": "Enterprise, Finance, Healthcare companies",
             },
         }
         return json.dumps(quotation, indent=2)
@@ -219,7 +213,6 @@ def premium_quotation_tool(
         return json.dumps({"error": str(e)}, indent=2)
 
 def explain_coverage_tiers(tier_id: int) -> str:
-    """Legal framework policy descriptions mapping tool."""
     info = {
         1: "Tier 1 covers Ransomware events, Forensics responses, Core recovery pipelines, and Data Breach leaks.",
         2: "Tier 2 covers Advanced network layer DDoS mitigation, internal Backdoors, Trojans, and APT system damages."
@@ -227,7 +220,6 @@ def explain_coverage_tiers(tier_id: int) -> str:
     return info.get(int(tier_id), "Invalid selection choice.")
 
 def compare_coverage_costs(tier1_premium: float) -> str:
-    """Computes basic financial tier comparisons."""
     p = float(tier1_premium)
     return json.dumps({"tier_1_only": f"${p:,.0f}", "tier_2_only": f"${(p*0.6):,.0f}", "combined": f"${(p*1.6):,.0f}"}, indent=2)
 
@@ -235,23 +227,18 @@ def compare_coverage_costs(tier1_premium: float) -> str:
 # PHASE 4: AGENT WORKFLOW DEFINITIONS & SCHEMAS
 # =====================================================================
 def create_quotation_agent() -> Agent:
-    """Produces the localized engine orchestration instance with rigorous parsing directives."""
     return Agent(
         name="Cyber Risk Premium Quotation Agent",
         model=Gemini(id="gemini-2.5-flash"),
         tools=[premium_quotation_tool, explain_coverage_tiers, compare_coverage_costs],
-        instructions="""You are an expert underwriting advisory instance.
-        
-        CRITICAL PROCESSING INTERFACE RULES:
-        1. Always translate conversational language regarding revenue parameters into absolute raw float representations for 'premium_quotation_tool':
-           - '150 Billion' -> pass exactly as 150000000000.0
-           - '20 Million' -> pass exactly as 20000000.0
-           - NEVER allow simple scalar terms like 150 or 20 to proceed. Doing so breaks structural formula metrics.
-           
-        2. Cleanly map sectors to targeting string codes:
-           Tech/Technology -> '51', Finance/Banking/Insurance -> '52', Retail -> '44-45'.
-           
-        3. Break calculations out nicely into pristine Markdown tables featuring Tier 1, Tier 2, and combined premium amounts.""",
+        instructions="""You are an expert cyber insurance underwriting agent.
+
+        EXECUTION PROTOCOL:
+        1. When a user provides text details, meticulously map out each variable required by 'premium_quotation_tool'.
+        2. If the user writes text like "Annual Revenue(USD): 150000", read the number literally as 150000.0. 
+        3. Ensure parameters are never mixed up. Pass revenue to 'company_revenue_usd' and employees to 'employee_count'.
+        4. Translate sectors to code strings carefully: Technology/Tech -> '51', Finance -> '52', Retail -> '44-45'.
+        5. Present calculated outputs clearly using Markdown tables containing Tier 1, Tier 2, and Combined coverage tiers.""",
         markdown=True,
     )
 
@@ -266,12 +253,10 @@ if "insurance_agent_messages" not in st.session_state:
 if "quotation_agent" not in st.session_state:
     st.session_state.quotation_agent = create_quotation_agent()
 
-# Display Session History Elements
 for msg in st.session_state.insurance_agent_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Collect and process current iterations
 if user_query := st.chat_input("Describe your corporate structure or request premium matrices..."):
     st.session_state.insurance_agent_messages.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
