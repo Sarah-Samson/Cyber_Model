@@ -17,7 +17,7 @@ from sklearn.model_selection import train_test_split
 warnings.filterwarnings("ignore")
 
 # =====================================================================
-# SYSTEM CONFIGISTRATION & UI LAYOUT
+# SYSTEM CONFIGURATION & UI LAYOUT
 # =====================================================================
 st.set_page_config(
     page_title="Cyber & AI Risk Insurance Pricing Engine",
@@ -43,14 +43,14 @@ INDUSTRY_CODES = {
 }
 
 # =====================================================================
-# CORE ACTUARIAL DATA & ENGINE CALIBRATION (FIXED URLS)
+# CORE ACTUARIAL DATA & ENGINE CALIBRATION (REVERTED TO FORMER LINKS)
 # =====================================================================
 @st.cache_data
 def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
     try:
-        # Fixed clean paths removing the trailing space (%20) mutation
-        incidents = pd.read_csv("https://raw.githubusercontent.com/Sarah-Samson/Cyber_Model/refs/heads/main/data/incidents_master_cleaned.csv")
-        financial = pd.read_csv("https://raw.githubusercontent.com/Sarah-Samson/Cyber_Model/refs/heads/main/data/financial_impact_cleaned.csv")
+        # Reverted back to the original repository links for testing
+        incidents = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/incidents_master_cleaned.csv")
+        financial = pd.read_csv("https://raw.githubusercontent.com/rajat4186/Cyber-Risk-Premium-Pricing-Agentic-AI-Project/refs/heads/main/data/financial_impact_cleaned.csv")
         
         # 1. Frequency Model Data Preparation
         company_freq = incidents.groupby("company_name").agg({
@@ -69,6 +69,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
         freq_cols = ["log_revenue", "log_employees", "is_public_company", "revenue_tier"]
         X_train_f, _, y_train_f, _ = train_test_split(X_freq[freq_cols].fillna(0), y_freq, test_size=0.2, random_state=42)
         
+        # Train GLM Poisson Regressor for baseline frequency metrics
         freq_model = PoissonRegressor(alpha=0.1292, max_iter=1000)
         freq_model.fit(X_train_f, y_train_f)
         
@@ -89,6 +90,7 @@ def calibrate_actuarial_core() -> Tuple[dict, dict, dict]:
         sev_cols = ["log_revenue", "log_employees", "is_public_company", "log_records"]
         X_train_s, _, y_train_s, _ = train_test_split(X_sev[sev_cols].fillna(0), np.log(merged["total_loss_usd"]), test_size=0.2, random_state=42)
         
+        # Train Ridge Regressor for baseline severity logs
         sev_model = Ridge(alpha=1.0)
         sev_model.fit(X_train_s, y_train_s)
         
